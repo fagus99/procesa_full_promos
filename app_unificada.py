@@ -50,7 +50,7 @@ def procesar_depositos(archivo):
     if not usuario_col or 'CANTIDAD' not in df.columns or 'FECHA' not in df.columns or 'ESTADO DEL PAGO' not in df.columns:
         st.warning("⚠️ Faltan columnas: 'beneficiario', 'CANTIDAD', 'FECHA' o 'ESTADO DEL PAGO'.")
         return None
-    df = df[df['ESTADO DEL PAGO'].astype(str).str.lower() == 'true']
+    df = df[df['ESTADO DEL PAGO'].astype(str).str.strip().str.lower() == 'true']
     df["CANTIDAD"] = pd.to_numeric(df["CANTIDAD"], errors="coerce").abs()
     df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce")
     df["hora"] = df["FECHA"].dt.hour
@@ -93,4 +93,3 @@ if archivo_jugado and archivo_depositos:
         output.seek(0)
 
         st.download_button("📥 Descargar Excel", data=output, file_name="usuarios_bonificables.xlsx", mime="application/octet-stream")
-
