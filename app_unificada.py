@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -48,9 +47,10 @@ def procesar_depositos(archivo):
     ext = archivo.name.split(".")[-1]
     df = pd.read_excel(archivo) if ext == "xlsx" else pd.read_csv(archivo, sep=None, engine="python")
     usuario_col = next((col for col in df.columns if col.strip().lower() == 'beneficiario'), None)
-    if not usuario_col or 'CANTIDAD' not in df.columns or 'FECHA' not in df.columns:
-        st.warning("⚠️ Faltan columnas: 'beneficiario', 'CANTIDAD' o 'FECHA'.")
+    if not usuario_col or 'CANTIDAD' not in df.columns or 'FECHA' not in df.columns or 'ESTADO DEL PAGO' not in df.columns:
+        st.warning("⚠️ Faltan columnas: 'beneficiario', 'CANTIDAD', 'FECHA' o 'ESTADO DEL PAGO'.")
         return None
+    df = df[df['ESTADO DEL PAGO'].astype(str).str.lower() == 'true']
     df["CANTIDAD"] = pd.to_numeric(df["CANTIDAD"], errors="coerce").abs()
     df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce")
     df["hora"] = df["FECHA"].dt.hour
@@ -93,3 +93,4 @@ if archivo_jugado and archivo_depositos:
         output.seek(0)
 
         st.download_button("📥 Descargar Excel", data=output, file_name="usuarios_bonificables.xlsx", mime="application/octet-stream")
+
