@@ -1,0 +1,95 @@
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+from io import BytesIO
+
+st.set_page_config(page_title="Promoción Casino - App Unificada", layout="wide")
+st.title("🎰 App Unificada - Promociones Casino")
+
+# === SUBIDA DE ARCHIVOS ===
+col1, col2 = st.columns(2)
+with col1:
+    archivo_jugado = st.file_uploader("📄 Subí archivo de jugado (CSV o Excel)", type=["csv", "xlsx"], key="jugado")
+with col2:
+    archivo_depositos = st.file_uploader("📄 Subí archivo de depósitos (CSV o Excel)", type=["csv", "xlsx"], key="depositos")
+
+# === PARÁMETROS DE PROMOCIÓN ===
+st.sidebar.header("⚙️ Configuración de la Promoción")
+porcentaje_bono = st.sidebar.number_input("Porcentaje de bono a entregar (%)", min_value=0.0, step=1.0)
+deposito_minimo = st.sidebar.number_input("Depósito mínimo requerido", min_value=0.0, step=100.0)
+jugado_minimo = st.sidebar.number_input("Importe jugado mínimo requerido", min_value=0.0, step=100.0)
+tope_bono = st.sidebar.number_input("Importe máximo de bono por usuario", min_value=0.0, step=100.0)
+aplica_rollover = st.sidebar.checkbox("¿Aplicar rollover?")
+if aplica_rollover:
+    cant_rollover = st.sidebar.number_input("Cantidad de rollover requerido", min_value=1)
+else:
+    cant_rollover = None
+tipo_deposito = st.sidebar.selectbox("Tipo de depósito a considerar", ["Suma de depósitos", "Depósito máximo", "Depósito mínimo"])
+
+# === FUNCIONES ===
+def procesar_jugado(archivo):
+    ext = archivo.name.split(".")[-1]
+    df = pd.read_excel(archivo) if ext == "xlsx" else pd.read_csv(archivo, sep=None, engine="python")
+    usuario_col = next((col for col in df.columns if col.strip().lower() == 'usuario'), None)
+    if not usuario_col:
+        st.warning("⚠️ No se encontró la columna 'usuario'.")
+        return None
+    cols_montos = [col for col in df.columns if any(p in col.lower() for p in ["jugado", "ganado", "neto"])]
+    for col in cols_montos:
+        df[col] = pd.to_numeric(df[col], errors='coerce').abs()
+    df["suma_total_jugado"] = df[[c for c in cols_montos if "jugado" in c.lower()]].sum(axis=1)
+    resumen = df.groupby(usuario_col).agg(total_jugado=("suma_total_jugado", "sum")).reset_index()
+    resumen = resumen[resumen["total_jugado"] > 0]
+    resumen = resumen.rename(columns={usuario_col: "usuario"})
+    return resumen
+
+def procesar_depositos(archivo):
+    ext = archivo.name.split(".")[-1]
+    df = pd.read_excel(archivo) if ext == "xlsx" else pd.read_csv(archivo, sep=None, engine="python")
+    usuario_col = next((col for col in df.columns if col.strip().lower() == 'beneficiario'), None)
+    if not usuario_col or 'CANTIDAD' not in df.columns or 'FECHA' not in df.columns:
+        st.warning("⚠️ Faltan columnas: 'beneficiario', 'CANTIDAD' o 'FECHA'.")
+        return None
+    df["CANTIDAD"] = pd.to_numeric(df["CANTIDAD"], errors="coerce").abs()
+    df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce")
+    df["hora"] = df["FECHA"].dt.hour
+    resumen = df.groupby(usuario_col).agg(
+        deposito_total=("CANTIDAD", "sum"),
+        deposito_maximo=("CANTIDAD", "max"),
+        deposito_minimo=("CANTIDAD", "min")
+    ).reset_index().rename(columns={usuario_col: "usuario"})
+    filtro_horario = df[df["hora"].between(17, 23)]
+    max_17_23 = filtro_horario.groupby(usuario_col)["CANTIDAD"].max().reset_index()
+    max_17_23.columns = ["usuario", "deposito_max_17_23"]
+    resumen = resumen.merge(max_17_23, on="usuario", how="left")
+    return resumen
+
+# === PROCESAMIENTO ===
+if archivo_jugado and archivo_depositos:
+    df_jugado = procesar_jugado(archivo_jugado)
+    df_depositos = procesar_depositos(archivo_depositos)
+
+    if df_jugado is not None and df_depositos is not None:
+        df = pd.merge(df_jugado, df_depositos, on="usuario", how="inner")
+        if tipo_deposito == "Suma de depósitos":
+            base = df["deposito_total"]
+        elif tipo_deposito == "Depósito máximo":
+            base = df["deposito_maximo"]
+        else:
+            base = df["deposito_minimo"]
+
+        df["bonificable"] = (base >= deposito_minimo) & (df["total_jugado"] >= jugado_minimo)
+        df["bono"] = np.where(df["bonificable"], np.minimum(base * porcentaje_bono / 100, tope_bono), 0)
+        df["rollover"] = df["bono"] * cant_rollover if aplica_rollover and cant_rollover else 0
+
+        st.subheader("🎯 Usuarios bonificables")
+        st.dataframe(df)
+
+        # Descargar resultados
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="Bonificables")
+        output.seek(0)
+
+        st.download_button("📥 Descargar Excel", data=output, file_name="usuarios_bonificables.xlsx", mime="application/octet-stream")
