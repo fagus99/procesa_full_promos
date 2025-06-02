@@ -81,6 +81,7 @@ if archivo_jugado and archivo_depositos:
 
         df["bonificable"] = (base >= deposito_minimo) & (df["total_jugado"] >= jugado_minimo)
         df["bono"] = np.where(df["bonificable"], np.minimum(base * porcentaje_bono / 100, tope_bono), 0)
+        df["bono"] = df["bono"].round()
         df["rollover"] = df["bono"] * cant_rollover if aplica_rollover and cant_rollover else 0
 
         st.subheader("🎯 Usuarios bonificables")
