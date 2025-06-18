@@ -46,17 +46,21 @@ def procesar_jugado(archivo):
 def procesar_depositos(archivo):
     ext = archivo.name.split(".")[-1]
     df = pd.read_excel(archivo) if ext == "xlsx" else pd.read_csv(archivo, sep=None, engine="python")
+
+    # Detectar columna 'beneficiario'
     usuario_col = next((col for col in df.columns if col.strip().lower() == 'beneficiario'), None)
-    
-    # Verificar que existan las columnas necesarias
-    if not usuario_col or 'CANTIDAD' not in df.columns or 'FECHA' not in df.columns or 'ESTADO DEL PAGO' not in df.columns:
-        st.warning("⚠️ Faltan columnas: 'beneficiario', 'CANTIDAD', 'FECHA' o 'ESTADO DEL PAGO'.")
+
+    # Detectar columna 'id pagador' (user ID)
+    id_pagador_col = next((col for col in df.columns if col.strip().lower() == 'id pagador'), None)
+
+    if not usuario_col or not id_pagador_col or 'CANTIDAD' not in df.columns or 'FECHA' not in df.columns or 'ESTADO DEL PAGO' not in df.columns:
+        st.warning("⚠️ Faltan columnas necesarias: 'beneficiario', 'ID PAGADOR', 'CANTIDAD', 'FECHA' o 'ESTADO DEL PAGO'.")
         return None
 
-    # Filtrar solo pagos confirmados
+    # Filtrar pagos confirmados
     df = df[df['ESTADO DEL PAGO'].astype(str).str.strip().str.lower() == 'true']
 
-    # ❗❗ NUEVO FILTRO: excluir 'Bonus Csv' y 'Bonus card'
+    # Excluir Bonus
     if 'FORMAS DE PAGO' in df.columns:
         df = df[~df['FORMAS DE PAGO'].astype(str).str.lower().isin(['bonus csv', 'bonus card'])]
 
@@ -64,17 +68,25 @@ def procesar_depositos(archivo):
     df["FECHA"] = pd.to_datetime(df["FECHA"], errors="coerce")
     df["hora"] = df["FECHA"].dt.hour
 
+    # Tomamos el primer ID PAGADOR por usuario (podés cambiar esto si hay varios por usuario)
+    df_ids = df[[usuario_col, id_pagador_col]].drop_duplicates().dropna()
+    df_ids = df_ids.rename(columns={usuario_col: "usuario", id_pagador_col: "user_id"})
+
     resumen = df.groupby(usuario_col).agg(
         deposito_total=("CANTIDAD", "sum"),
         deposito_maximo=("CANTIDAD", "max"),
         deposito_minimo=("CANTIDAD", "min")
     ).reset_index().rename(columns={usuario_col: "usuario"})
 
+    # Agregar ID PAGADOR
+    resumen = resumen.merge(df_ids, on="usuario", how="left")
+
+    # Agregar depósito máximo entre 17 y 23
     filtro_horario = df[df["hora"].between(17, 23)]
     max_17_23 = filtro_horario.groupby(usuario_col)["CANTIDAD"].max().reset_index()
     max_17_23.columns = ["usuario", "deposito_max_17_23"]
     resumen = resumen.merge(max_17_23, on="usuario", how="left")
-    
+
     return resumen
 
 
